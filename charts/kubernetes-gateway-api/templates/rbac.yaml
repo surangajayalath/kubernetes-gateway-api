@@ -1,0 +1,128 @@
+{{- if .Values.global.rbac.create }}
+{{- $saName := .Values.global.serviceAccount.name | default (printf "%s-sa" .Values.global.metadata.name) }}
+
+# --- 1. Role / ClusterRole Definition ---
+{{- if .Values.global.rbac.clusterScoped }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ .Values.global.rbac.name | default (printf "%s-role" .Values.global.metadata.name) }}
+  labels:
+    app.kubernetes.io/name: {{ .Values.global.metadata.name }}
+    app.kubernetes.io/component: gateway-rbac
+    {{- if .Values.global.rbac.labels }}
+    {{- toYaml .Values.global.rbac.labels | nindent 4 }}
+    {{- end }}
+  {{- if .Values.global.rbac.annotations }}
+  annotations:
+    {{- toYaml .Values.global.rbac.annotations | nindent 4 }}
+  {{- end }}
+{{- else }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ .Values.global.rbac.name | default (printf "%s-role" .Values.global.metadata.name) }}
+  namespace: {{ .Values.global.metadata.namespace }}
+  labels:
+    app.kubernetes.io/name: {{ .Values.global.metadata.name }}
+    app.kubernetes.io/component: gateway-rbac
+    {{- if .Values.global.rbac.labels }}
+    {{- toYaml .Values.global.rbac.labels | nindent 4 }}
+    {{- end }}
+  {{- if .Values.global.rbac.annotations }}
+  annotations:
+    {{- toYaml .Values.global.rbac.annotations | nindent 4 }}
+  {{- end }}
+{{- end }}
+rules:
+  # Core Kubernetes API Access (Services, Endpoints, Secrets, ConfigMaps)
+  - apiGroups: [""]
+    resources:
+      - services
+      - endpoints
+      - secrets
+      - configmaps
+    verbs:
+      - get
+      - list
+      - watch
+
+  # Gateway API Group Access
+  - apiGroups: ["gateway.networking.k8s.io"]
+    resources:
+      - gatewayclasses
+      - gateways
+      - httproutes
+      - grpcroutes
+      - tlsroutes
+      - tcproutes
+      - referencegrants
+      - backendtlspolicies
+    verbs:
+      - get
+      - list
+      - watch
+      - update
+      - patch
+
+  # Gateway API Status Subresource Updates
+  - apiGroups: ["gateway.networking.k8s.io"]
+    resources:
+      - gatewayclasses/status
+      - gateways/status
+      - httproutes/status
+      - grpcroutes/status
+      - tlsroutes/status
+      - tcproutes/status
+    verbs:
+      - update
+      - patch
+
+  # Custom User-defined Rules
+  {{- if .Values.global.rbac.extraRules }}
+  {{- toYaml .Values.global.rbac.extraRules | nindent 2 }}
+  {{- end }}
+
+---
+# --- 2. RoleBinding / ClusterRoleBinding Definition ---
+{{- if .Values.global.rbac.clusterScoped }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ .Values.global.rbac.name | default (printf "%s-rolebinding" .Values.global.metadata.name) }}
+  labels:
+    app.kubernetes.io/name: {{ .Values.global.metadata.name }}
+    app.kubernetes.io/component: gateway-rbac
+    {{- if .Values.global.rbac.labels }}
+    {{- toYaml .Values.global.rbac.labels | nindent 4 }}
+    {{- end }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ .Values.global.rbac.name | default (printf "%s-role" .Values.global.metadata.name) }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $saName }}
+    namespace: {{ .Values.global.metadata.namespace }}
+{{- else }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ .Values.global.rbac.name | default (printf "%s-rolebinding" .Values.global.metadata.name) }}
+  namespace: {{ .Values.global.metadata.namespace }}
+  labels:
+    app.kubernetes.io/name: {{ .Values.global.metadata.name }}
+    app.kubernetes.io/component: gateway-rbac
+    {{- if .Values.global.rbac.labels }}
+    {{- toYaml .Values.global.rbac.labels | nindent 4 }}
+    {{- end }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ .Values.global.rbac.name | default (printf "%s-role" .Values.global.metadata.name) }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $saName }}
+    namespace: {{ .Values.global.metadata.namespace }}
+{{- end }}
+{{- end }}

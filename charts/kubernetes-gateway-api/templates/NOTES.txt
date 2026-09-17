@@ -1,0 +1,56 @@
+===============================================================================
+  Gateway API Helm Chart Deployed Successfully!
+===============================================================================
+
+1. Release Details:
+   - Release Name : {{ .Release.Name }}
+   - Namespace    : {{ include "gateway-chart.namespace" . }}
+   - Chart        : {{ include "gateway-chart.chart" . }}
+
+2. Deployed Infrastructure & Policies:
+{{- if .Values.global.gatewayClass.enabled }}
+   - GatewayClass    : {{ .Values.global.gatewayClass.name }}
+{{- end }}
+{{- if .Values.global.gateway.enabled }}
+   - Gateway         : {{ include "gateway-chart.gatewayName" . }}
+{{- end }}
+{{- if .Values.global.referenceGrant.enabled }}
+   - ReferenceGrant  : {{ .Values.global.referenceGrant.name }}
+{{- end }}
+{{- if .Values.global.backendTLSPolicy.enabled }}
+   - BackendTLSPolicy: {{ .Values.global.backendTLSPolicy.name }}
+{{- end }}
+{{- if .Values.global.rateLimitPolicy.enabled }}
+   - RateLimitPolicy : {{ .Values.global.rateLimitPolicy.name }}
+{{- end }}
+
+3. Active Traffic Routes:
+   - HTTPRoute  : {{ if .Values.global.routes.http.enabled }}ENABLED ({{ .Values.global.routes.http.name }}){{ else }}DISABLED{{ end }}
+   - GRPCRoute  : {{ if .Values.global.routes.grpc.enabled }}ENABLED ({{ .Values.global.routes.grpc.name }}){{ else }}DISABLED{{ end }}
+   - TCPRoute   : {{ if .Values.global.routes.tcp.enabled }}ENABLED ({{ .Values.global.routes.tcp.name }}){{ else }}DISABLED{{ end }}
+   - TLSRoute   : {{ if .Values.global.routes.tls.enabled }}ENABLED ({{ .Values.global.routes.tls.name }}){{ else }}DISABLED{{ end }}
+
+4. How to verify your Gateway:
+
+   A. Check the Gateway status and programming condition:
+      $ kubectl get gateway {{ include "gateway-chart.gatewayName" . }} -n {{ include "gateway-chart.namespace" . }} -o wide
+
+   B. Inspect assigned external IP / hostname (Cloud Load Balancer):
+      $ kubectl get gateway {{ include "gateway-chart.gatewayName" . }} -n {{ include "gateway-chart.namespace" . }} -o jsonpath='{.status.addresses[*].value}'
+
+   C. Check attached HTTPRoute status:
+{{- if .Values.global.routes.http.enabled }}
+      $ kubectl get httproute {{ .Values.global.routes.http.name }} -n {{ include "gateway-chart.namespace" . }}
+{{- else }}
+      (HTTPRoute is currently disabled)
+{{- end }}
+
+5. Run Verification Suite (Helm Hook):
+{{- if .Values.tests.enabled }}
+   Execute end-to-end connectivity checks:
+      $ helm test {{ .Release.Name }} -n {{ include "gateway-chart.namespace" . }}
+{{- else }}
+   (Helm connection tests are currently disabled in values.yaml)
+{{- end }}
+
+===============================================================================

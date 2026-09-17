@@ -1,0 +1,345 @@
+# ==============================================================================
+# GLOBAL METADATA & DEFAULTS
+# Controls the default naming, namespace, and labeling conventions across resources.
+# ==============================================================================
+global:
+  metadata:
+    name: main-gateway
+    namespace: infrastructure
+    labels:
+      environment: production
+      managed-by: helm
+    annotations:
+      description: "Core ingress gateway for enterprise traffic routing"
+
+  serviceAccount:
+    create: false
+  rbac:
+    create: false
+    clusterScoped: false
+    name: main-gateway-rbac
+    labels:
+      app: main-gateway
+    annotations:
+      description: "RBAC for Gateway API resources"
+  podDisruptionBudget:
+    enabled: false
+    minAvailable: 1
+    maxUnavailable: 1
+  hpa:
+    enabled: false
+    minReplicas: 2
+    maxReplicas: 5
+    metrics:
+      - type: Resource
+        resource:
+          name: cpu
+          target:
+            type: Utilization
+            averageUtilization: 80
+
+  # ============================================================================
+  # 1. GATEWAY CLASS CONFIGURATION
+  # Defines the underlying controller implementation (e.g., Envoy Gateway, Istio, Cilium).
+  # ============================================================================
+  gatewayClass:
+    # Set to 'false' if the GatewayClass is managed cluster-wide by platform admins.
+    enabled: true
+    name: envoy-gateway-class
+    # Specifies which controller process watches and reconciliation loop handles this class.
+    controllerName: gateway.envoyproxy.io/gatewayclass-controller
+    description: "Standard Envoy GatewayClass"
+    # Custom configuration parameters passed directly to the Envoy controller.
+    parametersRef:
+      group: gateway.envoyproxy.io
+      kind: EnvoyProxy
+      name: custom-envoy-config
+      namespace: infrastructure
+
+  # SCENARIO & IMPLICATIONS:
+  # - Controller Mismatch: If controllerName does not match the deployed Envoy Gateway 
+  #   operator deployment, the Gateway resource will stay in a 'Pending' status.
+  # - Permission Escalation: In multi-tenant clusters, devs should NOT edit GatewayClass. 
+  #   Keep 'enabled: false' for application-level Helm deployments.
+
+  # ============================================================================
+  # 2. GATEWAY INSTANCE CONFIGURATION
+  # Represents the actual load balancer instance and its entry points (listeners).
+  # ============================================================================
+  gateway:
+    enabled: true
+    name: main-gateway
+    gatewayClassName: envoy-gateway-class
+    labels:
+      app: main-gateway
+    
+    # Infrastructure-level annotations to provision underlying cloud resources (e.g., AWS NLB).
+    infrastructure:
+      annotations:
+        service.beta.kubernetes.io/aws-load-balancer-type: "nlb" # Provisions an AWS Network Load Balancer
+      labels:
+        tier: edge
+
+    # Listener configurations mapping network ports to protocols and TLS settings.
+    listeners:
+      # --- HTTP Listener (Port 80) ---
+      - name: http
+        hostname: "*.example.com" # Accepts wildcard traffic for subdomains
+        port: 80
+        protocol: HTTP
+        allowedRoutes:
+          namespaces:
+            from: Same # SECURITY: Only allows Routes in the 'infrastructure' namespace to bind.
+
+      # --- HTTPS Listener (Port 443) ---
+      - name: https
+        hostname: "api.example.com"
+        port: 443
+        protocol: HTTPS
+        tls:
+          mode: Terminate # Gateway terminates TLS before passing plain HTTP/2 to backends.
+          certificateRefs:
+            - kind: Secret
+              name: example-com-tls-cert # Must match the secret holding tls.crt/tls.key
+        allowedRoutes:
+          namespaces:
+            from: Selector # SECURITY: Cross-namespace binding based on namespace labels.
+            selector:
+              matchLabels:
+                gateway-access: "true" # Only namespaces with this label can bind HTTPRoutes.
+
+      # --- gRPC Listener (Port 9000) ---
+      #- name: grpc
+      #  hostname: "grpc.example.com"
+      #  port: 9000
+      #  protocol: HTTPS
+      #  tls:
+      #    mode: Terminate
+      #    certificateRefs:
+      #      - kind: Secret
+      #        name: example-com-tls-cert
+      #  allowedRoutes:
+      #    namespaces:
+      #      from: Same
+
+  # SCENARIO & IMPLICATIONS:
+  # - Cross-Namespace Hijacking: Setting allowedRoutes.namespaces.from to 'All' allows 
+  #   ANY namespace to intercept traffic for api.example.com. Using 'Selector' enforces governance.
+  # - Port Conflicts: Ensure listener ports (80, 443, 9000) do not conflict on host networks or 
+  #   collide with controller health probe ports.
+
+  # ============================================================================
+  # 3. TRAFFIC ROUTING RULES
+  # Protocol-specific routing specs (L7 HTTP/gRPC & L4 TCP/TLS Passthrough).
+  # ============================================================================
+  routes:
+    # --------------------------------------------------------------------------
+    # HTTPRoute: Handles HTTP/HTTPS routing, canary splits, header matching, rewrites.
+    # --------------------------------------------------------------------------
+    http:
+      enabled: true
+      name: api-http-route
+      labels:
+        app: api-service
+      annotations:
+        ingress.kubernetes.io/timeout: "30s"
+      parentRefs:
+        - name: main-gateway
+          sectionName: https # Binds specifically to the 'https' listener on port 443
+      hostnames:
+        - "api.example.com"
+      rules:
+        - matches:
+            - path:
+                type: PathPrefix
+                value: /v1
+              headers:
+                - type: Exact
+                  name: x-client-version
+                  value: "v2" # Only matches requests containing header 'x-client-version: v2'
+
+          # Filters transform requests before forwarding to backends.
+          filters:
+            - type: URLRewrite
+              urlRewrite:
+                hostname: internal-api.local
+                path:
+                  type: ReplacePrefixMatch
+                  replacePrefixMatch: /internal/v1 # Rewrites /v1/users -> /internal/v1/users
+
+          # Backend traffic splitting (Canary Deployment Pattern)
+          backendRefs:
+            - name: api-v1-service
+              port: 8080
+              weight: 90 # Receives 90% of matching traffic
+            - name: api-v1-canary-service
+              port: 8080
+              weight: 10 # Receives 10% of matching traffic
+
+          timeouts:
+            request: 15s # Drops connection if backend takes longer than 15s to respond
+          retry:
+            attempts: 3
+            backoff: 100ms
+
+    # SCENARIO & IMPLICATIONS:
+    # - Canary Splitting: If 'api-v1-canary-service' pods are crashing, 10% of requests will fail 
+    #   503. Combine with Envoy Gateway Health Checks to auto-drain failing canaries.
+    # - Path Rewrites: Incorrect ReplacePrefixMatch paths can break backend API routing routes 
+    #   (e.g., double slashes like //internal/v1).
+
+    # --------------------------------------------------------------------------
+    # GRPCRoute: Native gRPC protocol routing by service & method name.
+    # --------------------------------------------------------------------------
+    grpc:
+      enabled: true
+      name: service-grpc-route
+      parentRefs:
+        - name: main-gateway
+          sectionName: grpc
+      hostnames:
+        - "grpc.example.com"
+      rules:
+        - matches:
+            - method:
+                service: "com.example.UserService" # Protobuf Service package/interface
+                method: "GetUser"                  # Protobuf RPC method name
+          backendRefs:
+            - name: user-grpc-service
+              port: 9000
+              weight: 100
+
+    # SCENARIO & IMPLICATIONS:
+    # - Protobuf Schema Mismatch: If service or method names do not match the exact case-sensitive 
+    #   package name defined in .proto files, Envoy returns gRPC status code 12 (UNIMPLEMENTED).
+
+    # --------------------------------------------------------------------------
+    # TCPRoute: Raw Layer-4 proxying for non-HTTP services (e.g., Databases).
+    # --------------------------------------------------------------------------
+    tcp:
+      enabled: true
+      name: database-tcp-route
+      parentRefs:
+        - name: main-gateway
+          sectionName: mysql # Binds to a dedicated TCP listener (e.g., port 3306)
+      rules:
+        - backendRefs:
+            - name: mysql-primary
+              port: 3306
+              weight: 100
+
+    # --------------------------------------------------------------------------
+    # TLSRoute: SNI-based TLS passthrough (Gateway does NOT terminate TLS).
+    # --------------------------------------------------------------------------
+    tls:
+      enabled: true
+      name: passthrough-tls-route
+      parentRefs:
+        - name: main-gateway
+          sectionName: tls-passthrough
+      hostnames:
+        - "secure-vault.example.com" # Routes based strictly on TLS SNI header
+      rules:
+        - backendRefs:
+            - name: vault-backend-service
+              port: 8443
+
+  # ============================================================================
+  # 4. CROSS-NAMESPACE & SECURITY POLICIES
+  # Governs cross-namespace secret referencing and TLS provisioning.
+  # ============================================================================
+  
+  # --- ReferenceGrant: Trust handshake for cross-namespace resources ---
+  referenceGrant:
+    enabled: true
+    name: allow-infra-gateway-access
+    targetNamespace: app-secrets-ns # The namespace where the target resource (Secret) lives
+    from:
+      - group: "gateway.networking.k8s.io"
+        kind: "Gateway"
+        namespace: "infrastructure" # The namespace requesting access
+    to:
+      - group: ""
+        kind: "Secret"
+        name: "shared-tls-cert"
+
+  # SCENARIO & IMPLICATIONS:
+  # - ReferenceGrant Omission: Without this, if Gateway in 'infrastructure' references a Secret in 
+  #   'app-secrets-ns', Kubernetes Gateway API blocks it for security. The listener status 
+  #   will show 'InvalidCertificateRef'.
+
+  # --- TLS Secret / Cert-Manager Automation ---
+  tlsSecret:
+    enabled: true
+    type: "cert-manager" # Options: "cert-manager" (auto-renew) or "static" (manual crt/key)
+    name: "example-com-cert-resource"
+    secretName: "example-com-tls-cert"
+    certManager:
+      issuerName: "letsencrypt-production"
+      issuerKind: "ClusterIssuer"
+      dnsNames:
+        - "api.example.com"
+        - "grpc.example.com"
+        - "*.example.com"
+    crt: ""
+    key: ""
+
+  # ============================================================================
+  # 5. ADVANCED POLICY & EXTENSIONS
+  # Handles Zero-Trust internal mesh (mTLS) and API rate limiting.
+  # ============================================================================
+  
+  # --- BackendTLSPolicy: Zero-Trust mTLS between Gateway Proxy and Pods ---
+  backendTLSPolicy:
+    enabled: true
+    name: strict-backend-mtls
+    targetRefs:
+      - group: ""
+        kind: Service
+        name: api-v1-service
+    validation:
+      hostname: "api-v1.internal" # SAN name present on backend's TLS certificate
+      caCertificateRefs:
+        - group: ""
+          kind: ConfigMap
+          name: internal-ca-bundle # ConfigMap containing the internal root CA bundle
+
+  # SCENARIO & IMPLICATIONS:
+  # - SAN / Hostname Mismatch: If backend pods present a cert signed by the CA, but missing 
+  #   'api-v1.internal' in its Subject Alternative Name (SAN), Envoy will terminate backend 
+  #   probes and return '502 Bad Gateway'.
+
+  # --- RateLimitPolicy: Local/Global rate limiting per route ---
+  rateLimitPolicy:
+    enabled: true
+    name: global-api-rate-limit
+    targetRef:
+      group: "gateway.networking.k8s.io"
+      kind: "HTTPRoute"
+      name: "api-http-route"
+    local:
+      rules:
+        - maxTokens: 200      # Maximum burst size allowed
+          tokensPerFill: 50   # Tokens added back per interval
+          fillInterval: 1s    # Sustained rate: 50 requests/sec
+
+  # SCENARIO & IMPLICATIONS:
+  # - DDoS Protection: Keeps bursty traffic from overwhelming microservices. Excess requests 
+  #   immediately receive an HTTP 429 (Too Many Requests) response from the proxy layer.
+
+# ==============================================================================
+# 6. HELM TEST VERIFICATION CONFIGURATION
+# Executed when running 'helm test <release-name>' to validate deployment readiness.
+# ==============================================================================
+tests:
+  enabled: true
+  image:
+    repository: busybox
+    tag: latest
+    pullPolicy: IfNotPresent
+  timeout: 5
+  targets:
+    - name: "HTTP Health Endpoint"
+      url: "http://main-gateway.infrastructure.svc.cluster.local/v1/health"
+    - name: "HTTPS API Endpoint"
+      url: "https://api.example.com/v1"

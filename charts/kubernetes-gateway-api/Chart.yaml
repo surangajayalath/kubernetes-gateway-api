@@ -1,0 +1,32 @@
+apiVersion: v2
+name: kubernetes-gateway-api
+description: Kubernetes Helm chart for Kubernetes Gateway API resources
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+
+home: https://github.com/surangajayalath/kubernetes-gateway-api
+
+sources:
+  - https://github.com/surangajayalath/kubernetes-gateway-api
+
+icon: https://raw.githubusercontent.com/surangajayalath/kubernetes-gateway-api/main/assets/logo.png
+
+maintainers:
+  - name: surangajayalath
+
+keywords:
+  - kubernetes
+  - helm
+  - gateway
+  - gateway-api
+  - kubernetes-gateway-api
+
+annotations:
+  artifacthub.io/category: integration-delivery
+  artifacthub.io/license: Apache-2.0
+  artifacthub.io/maintainers: |
+    - name: surangajayalath
+  artifacthub.io/links: |
+    - name: source
+      url: https://github.com/surangajayalath/kubernetes-gateway-api

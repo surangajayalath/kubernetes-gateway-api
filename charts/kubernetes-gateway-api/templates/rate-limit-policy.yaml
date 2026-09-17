@@ -1,0 +1,14 @@
+{{- if .Values.global.rateLimitPolicy.enabled }}
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: RateLimitPolicy
+metadata:
+  name: {{ .Values.global.rateLimitPolicy.name | default (printf "%s-rate-limit" .Values.global.metadata.name) }}
+  namespace: {{ .Values.global.metadata.namespace }}
+spec:
+  targetRef:
+    group: {{ .Values.global.rateLimitPolicy.targetRef.group | default "gateway.networking.k8s.io" | quote }}
+    kind: {{ .Values.global.rateLimitPolicy.targetRef.kind | default "HTTPRoute" }}
+    name: {{ .Values.global.rateLimitPolicy.targetRef.name }}
+  local:
+    {{- toYaml .Values.global.rateLimitPolicy.local | nindent 4 }}
+{{- end }}

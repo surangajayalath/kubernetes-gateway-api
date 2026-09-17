@@ -1,0 +1,25 @@
+{{- if .Values.global.referenceGrant.enabled }}
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: {{ .Values.global.referenceGrant.name | default (printf "%s-ref-grant" .Values.global.metadata.name) }}
+  namespace: {{ .Values.global.referenceGrant.targetNamespace | default .Values.global.metadata.namespace }}
+  labels:
+    app.kubernetes.io/name: {{ .Values.global.metadata.name }}
+    app.kubernetes.io/component: security
+spec:
+  from:
+    {{- range .Values.global.referenceGrant.from }}
+    - group: {{ .group | quote }}
+      kind: {{ .kind }}
+      namespace: {{ .namespace }}
+    {{- end }}
+  to:
+    {{- range .Values.global.referenceGrant.to }}
+    - group: {{ .group | default "" | quote }}
+      kind: {{ .kind }}
+      {{- if .name }}
+      name: {{ .name }}
+      {{- end }}
+    {{- end }}
+{{- end }}

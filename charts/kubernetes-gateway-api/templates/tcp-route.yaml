@@ -1,0 +1,24 @@
+{{- if .Values.global.routes.tcp.enabled }}
+apiVersion: gateway.networking.k8s.io/v1alpha2
+kind: TCPRoute
+metadata:
+  name: {{ .Values.global.routes.tcp.name | default (printf "%s-tcp-route" .Values.global.metadata.name) }}
+  namespace: {{ .Values.global.metadata.namespace }}
+spec:
+  parentRefs:
+    {{- range .Values.global.routes.tcp.parentRefs }}
+    - name: {{ .name | default $.Values.global.metadata.name }}
+      sectionName: {{ .sectionName }}
+    {{- end }}
+  rules:
+    {{- range .Values.global.routes.tcp.rules }}
+    - backendRefs:
+        {{- range .backendRefs }}
+        - name: {{ .name }}
+          port: {{ .port }}
+          {{- if .weight }}
+          weight: {{ .weight }}
+          {{- end }}
+        {{- end }}
+    {{- end }}
+{{- end }}

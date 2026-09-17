@@ -1,0 +1,124 @@
+{{- if .Values.global.hpa.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ .Values.global.hpa.name | default (printf "%s-hpa" .Values.global.metadata.name) }}
+  namespace: {{ .Values.global.metadata.namespace }}
+  labels:
+    app.kubernetes.io/name: {{ .Values.global.metadata.name }}
+    app.kubernetes.io/component: gateway
+    {{- if .Values.global.hpa.labels }}
+    {{- toYaml .Values.global.hpa.labels | nindent 4 }}
+    {{- end }}
+  {{- if .Values.global.hpa.annotations }}
+  annotations:
+    {{- toYaml .Values.global.hpa.annotations | nindent 4 }}
+  {{- end }}
+spec:
+  # Target Reference (Defaults to Deployment, but can target StatefulSet, Argo Rollout, etc.)
+  scaleTargetRef:
+    apiVersion: {{ .Values.global.hpa.scaleTargetRef.apiVersion | default "apps/v1" }}
+    kind: {{ .Values.global.hpa.scaleTargetRef.kind | default "Deployment" }}
+    name: {{ .Values.global.hpa.scaleTargetRef.name | default .Values.global.metadata.name }}
+  
+  minReplicas: {{ .Values.global.hpa.minReplicas | default 2 }}
+  maxReplicas: {{ .Values.global.hpa.maxReplicas | default 10 }}
+
+  # Scaling Behaviors (Scale-Up / Scale-Down Policies & Stabilization Windows)
+  {{- if .Values.global.hpa.behavior }}
+  behavior:
+    {{- toYaml .Values.global.hpa.behavior | nindent 4 }}
+  {{- end }}
+
+  # Metrics Array
+  metrics:
+    # Resource Metrics (CPU & Memory)
+    {{- if .Values.global.hpa.metrics.cpu.enabled }}
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: {{ .Values.global.hpa.metrics.cpu.targetType | default "Utilization" }}
+          {{- if eq (.Values.global.hpa.metrics.cpu.targetType | default "Utilization") "Utilization" }}
+          averageUtilization: {{ .Values.global.hpa.metrics.cpu.averageUtilization }}
+          {{- else if eq .Values.global.hpa.metrics.cpu.targetType "AverageValue" }}
+          averageValue: {{ .Values.global.hpa.metrics.cpu.averageValue }}
+          {{- end }}
+    {{- end }}
+
+    {{- if .Values.global.hpa.metrics.memory.enabled }}
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: {{ .Values.global.hpa.metrics.memory.targetType | default "Utilization" }}
+          {{- if eq (.Values.global.hpa.metrics.memory.targetType | default "Utilization") "Utilization" }}
+          averageUtilization: {{ .Values.global.hpa.metrics.memory.averageUtilization }}
+          {{- else if eq .Values.global.hpa.metrics.memory.targetType "AverageValue" }}
+          averageValue: {{ .Values.global.hpa.metrics.memory.averageValue }}
+          {{- end }}
+    {{- end }}
+
+    # Custom Pods Metrics (e.g., custom application metrics per pod)
+    {{- if .Values.global.hpa.metrics.pods }}
+    {{- range .Values.global.hpa.metrics.pods }}
+    - type: Pods
+      pods:
+        metric:
+          name: {{ .name }}
+          {{- if .selector }}
+          selector:
+            {{- toYaml .selector | nindent 12 }}
+          {{- end }}
+        target:
+          type: AverageValue
+          averageValue: {{ .averageValue }}
+    {{- end }}
+    {{- end }}
+
+    # Object Metrics (e.g., Ingress request rate, Gateway API connection count)
+    {{- if .Values.global.hpa.metrics.object }}
+    {{- range .Values.global.hpa.metrics.object }}
+    - type: Object
+      object:
+        describedObject:
+          apiVersion: {{ .describedObject.apiVersion }}
+          kind: {{ .describedObject.kind }}
+          name: {{ .describedObject.name }}
+        metric:
+          name: {{ .name }}
+          {{- if .selector }}
+          selector:
+            {{- toYaml .selector | nindent 12 }}
+          {{- end }}
+        target:
+          type: {{ .targetType | default "Value" }}
+          {{- if eq (.targetType | default "Value") "Value" }}
+          value: {{ .value }}
+          {{- else if eq .targetType "AverageValue" }}
+          averageValue: {{ .averageValue }}
+          {{- end }}
+    {{- end }}
+    {{- end }}
+
+    # External Metrics (e.g., AWS SQS queue depth, Datadog/Prometheus metric)
+    {{- if .Values.global.hpa.metrics.external }}
+    {{- range .Values.global.hpa.metrics.external }}
+    - type: External
+      external:
+        metric:
+          name: {{ .name }}
+          {{- if .selector }}
+          selector:
+            {{- toYaml .selector | nindent 12 }}
+          {{- end }}
+        target:
+          type: {{ .targetType | default "Value" }}
+          {{- if eq (.targetType | default "Value") "Value" }}
+          value: {{ .value | quote }}
+          {{- else if eq .targetType "AverageValue" }}
+          averageValue: {{ .averageValue | quote }}
+          {{- end }}
+    {{- end }}
+    {{- end }}
+{{- end }}

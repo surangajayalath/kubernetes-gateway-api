@@ -1,0 +1,25 @@
+{{- if .Values.global.routes.tls.enabled }}
+apiVersion: gateway.networking.k8s.io/v1alpha2
+kind: TLSRoute
+metadata:
+  name: {{ .Values.global.routes.tls.name | default (printf "%s-tls-route" .Values.global.metadata.name) }}
+  namespace: {{ .Values.global.metadata.namespace }}
+spec:
+  parentRefs:
+    {{- range .Values.global.routes.tls.parentRefs }}
+    - name: {{ .name | default $.Values.global.metadata.name }}
+      sectionName: {{ .sectionName }}
+    {{- end }}
+  {{- if .Values.global.routes.tls.hostnames }}
+  hostnames:
+    {{- toYaml .Values.global.routes.tls.hostnames | nindent 4 }}
+  {{- end }}
+  rules:
+    {{- range .Values.global.routes.tls.rules }}
+    - backendRefs:
+        {{- range .backendRefs }}
+        - name: {{ .name }}
+          port: {{ .port }}
+        {{- end }}
+    {{- end }}
+{{- end }}

@@ -1,0 +1,42 @@
+{{- if .Values.global.podDisruptionBudget.enabled }}
+apiVersion: {{ include "pdb.apiVersion" . }}
+kind: PodDisruptionBudget
+metadata:
+  name: {{ .Values.global.podDisruptionBudget.name | default (printf "%s-pdb" .Values.global.metadata.name) }}
+  namespace: {{ .Values.global.metadata.namespace }}
+  labels:
+    app.kubernetes.io/name: {{ .Values.global.metadata.name }}
+    app.kubernetes.io/component: gateway
+    {{- if .Values.global.podDisruptionBudget.labels }}
+    {{- toYaml .Values.global.podDisruptionBudget.labels | nindent 4 }}
+    {{- end }}
+  {{- if .Values.global.podDisruptionBudget.annotations }}
+  annotations:
+    {{- toYaml .Values.global.podDisruptionBudget.annotations | nindent 4 }}
+  {{- end }}
+spec:
+  # Note: Kubernetes PDBs accept EITHER minAvailable OR maxUnavailable, but NOT both simultaneously.
+  {{- if .Values.global.podDisruptionBudget.minAvailable }}
+  minAvailable: {{ .Values.global.podDisruptionBudget.minAvailable }}
+  {{- else if .Values.global.podDisruptionBudget.maxUnavailable }}
+  maxUnavailable: {{ .Values.global.podDisruptionBudget.maxUnavailable }}
+  {{- end }}
+
+  # Label Selector matching target Pods
+  selector:
+    {{- if .Values.global.podDisruptionBudget.selector.matchLabels }}
+    matchLabels:
+      {{- toYaml .Values.global.podDisruptionBudget.selector.matchLabels | nindent 6 }}
+    {{- else if .Values.global.podDisruptionBudget.selector.matchExpressions }}
+    matchExpressions:
+      {{- toYaml .Values.global.podDisruptionBudget.selector.matchExpressions | nindent 6 }}
+    {{- else }}
+    matchLabels:
+      app.kubernetes.io/name: {{ .Values.global.metadata.name }}
+    {{- end }}
+
+  # Unhealthy Pod Eviction Policy (k8s 1.27+)
+  {{- if .Values.global.podDisruptionBudget.unhealthyPodEvictionPolicy }}
+  unhealthyPodEvictionPolicy: {{ .Values.global.podDisruptionBudget.unhealthyPodEvictionPolicy }}
+  {{- end }}
+{{- end }}

@@ -1,0 +1,36 @@
+{{- if .Values.global.gatewayClass.enabled }}
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata:
+  name: {{ .Values.global.gatewayClass.name | default .Values.global.metadata.name }}
+  labels:
+    app.kubernetes.io/name: {{ .Values.global.metadata.name }}
+    app.kubernetes.io/component: gateway-class
+    {{- if .Values.global.gatewayClass.labels }}
+    {{- toYaml .Values.global.gatewayClass.labels | nindent 4 }}
+    {{- end }}
+  {{- if .Values.global.gatewayClass.annotations }}
+  annotations:
+    {{- toYaml .Values.global.gatewayClass.annotations | nindent 4 }}
+  {{- end }}
+spec:
+  # The unique controller string managed by the Gateway implementation
+  # Examples: envoyproxy.gateway.envoyproxy.io/gateway-class-controller, istio.io/gateway-controller, cilium.io/gateway-controller
+  controllerName: {{ .Values.global.gatewayClass.controllerName | quote }}
+
+  # Global parameters reference for this GatewayClass (CRD, ConfigMap, or custom resource)
+  {{- if .Values.global.gatewayClass.parametersRef }}
+  parametersRef:
+    group: {{ .Values.global.gatewayClass.parametersRef.group | quote }}
+    kind: {{ .Values.global.gatewayClass.parametersRef.kind }}
+    name: {{ .Values.global.gatewayClass.parametersRef.name }}
+    {{- if .Values.global.gatewayClass.parametersRef.namespace }}
+    namespace: {{ .Values.global.gatewayClass.parametersRef.namespace }}
+    {{- end }}
+  {{- end }}
+
+  # Description of the GatewayClass capabilities or purpose
+  {{- if .Values.global.gatewayClass.description }}
+  description: {{ .Values.global.gatewayClass.description | quote }}
+  {{- end }}
+{{- end }}

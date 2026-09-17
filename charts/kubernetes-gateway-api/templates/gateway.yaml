@@ -1,0 +1,94 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: {{ .Values.global.metadata.name }}
+  namespace: {{ .Values.global.metadata.namespace }}
+  labels:
+    {{- include "gateway-chart.labels" . | nindent 4 }}
+    {{- if .Values.global.gateway.labels }}
+    {{- toYaml .Values.global.gateway.labels | nindent 4 }}
+    {{- end }}
+  {{- if .Values.global.gateway.annotations }}
+  annotations:
+    {{- toYaml .Values.global.gateway.annotations | nindent 4 }}
+  {{- end }}
+spec:
+  gatewayClassName: {{ .Values.global.gateway.gatewayClassName | default .Values.global.spec.gatewayClassName }}
+
+  # Advanced Infrastructure Settings
+  {{- if .Values.global.gateway.infrastructure }}
+  infrastructure:
+    {{- if .Values.global.gateway.infrastructure.labels }}
+    labels:
+      {{- toYaml .Values.global.gateway.infrastructure.labels | nindent 6 }}
+    {{- end }}
+    {{- if .Values.global.gateway.infrastructure.annotations }}
+    annotations:
+      {{- toYaml .Values.global.gateway.infrastructure.annotations | nindent 6 }}
+    {{- end }}
+    {{- if .Values.global.gateway.infrastructure.parametersRef }}
+    parametersRef:
+      group: {{ .Values.global.gateway.infrastructure.parametersRef.group | quote }}
+      kind: {{ .Values.global.gateway.infrastructure.parametersRef.kind }}
+      name: {{ .Values.global.gateway.infrastructure.parametersRef.name }}
+    {{- end }}
+  {{- end }}
+
+  # Advanced Listener Configurations (TLS, Protocols, Hostnames, Route Selection)
+  listeners:
+    {{- range .Values.global.gateway.listeners }}
+    - name: {{ .name }}
+      protocol: {{ .protocol }}
+      port: {{ .port }}
+      {{- if .hostname }}
+      hostname: {{ .hostname | quote }}
+      {{- end }}
+
+      # TLS / HTTPS Configuration
+      {{- if .tls }}
+      tls:
+        mode: {{ .tls.mode | default "Terminate" }}
+        certificateRefs:
+          {{- range .tls.certificateRefs }}
+          - group: {{ .group | default "" | quote }}
+            kind: {{ .kind | default "Secret" }}
+            name: {{ .name }}
+            {{- if .namespace }}
+            namespace: {{ .namespace }}
+            {{- end }}
+          {{- end }}
+        {{- if .tls.options }}
+        options:
+          {{- toYaml .tls.options | nindent 10 }}
+        {{- end }}
+      {{- end }}
+
+      # Advanced Route Attachment Controls
+      {{- if .allowedRoutes }}
+      allowedRoutes:
+        {{- if .allowedRoutes.namespaces }}
+        namespaces:
+          from: {{ .allowedRoutes.namespaces.from | default "Same" }}
+          {{- if eq .allowedRoutes.namespaces.from "Selector" }}
+          selector:
+            {{- toYaml .allowedRoutes.namespaces.selector | nindent 12 }}
+          {{- end }}
+        {{- end }}
+        {{- if .allowedRoutes.kinds }}
+        kinds:
+          {{- range .allowedRoutes.kinds }}
+          - group: {{ .group | default "gateway.networking.k8s.io" | quote }}
+            kind: {{ .kind }}
+          {{- end }}
+        {{- end }}
+      {{- end }}
+    {{- end }}
+
+  # Static IP address requests for cloud or metal load balancers
+  {{- if .Values.global.gateway.addresses }}
+  addresses:
+    {{- range .Values.global.gateway.addresses }}
+    - type: {{ .type | default "IPAddress" }}
+      value: {{ .value }}
+    {{- end }}
+  {{- end }}

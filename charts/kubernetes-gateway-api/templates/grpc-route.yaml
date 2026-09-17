@@ -1,0 +1,39 @@
+{{- if .Values.global.routes.grpc.enabled }}
+apiVersion: gateway.networking.k8s.io/v1
+kind: GRPCRoute
+metadata:
+  name: {{ .Values.global.routes.grpc.name | default (printf "%s-grpc-route" .Values.global.metadata.name) }}
+  namespace: {{ .Values.global.metadata.namespace }}
+  labels:
+    app.kubernetes.io/name: {{ .Values.global.metadata.name }}
+    app.kubernetes.io/component: grpc-route
+spec:
+  parentRefs:
+    {{- range .Values.global.routes.grpc.parentRefs }}
+    - name: {{ .name | default $.Values.global.metadata.name }}
+      {{- if .sectionName }}
+      sectionName: {{ .sectionName }}
+      {{- end }}
+    {{- end }}
+
+  {{- if .Values.global.routes.grpc.hostnames }}
+  hostnames:
+    {{- toYaml .Values.global.routes.grpc.hostnames | nindent 4 }}
+  {{- end }}
+
+  rules:
+    {{- range .Values.global.routes.grpc.rules }}
+    - {{- if .matches }}
+      matches:
+        {{- toYaml .matches | nindent 8 }}
+      {{- end }}
+      backendRefs:
+        {{- range .backendRefs }}
+        - name: {{ .name }}
+          port: {{ .port }}
+          {{- if .weight }}
+          weight: {{ .weight }}
+          {{- end }}
+        {{- end }}
+    {{- end }}
+{{- end }}

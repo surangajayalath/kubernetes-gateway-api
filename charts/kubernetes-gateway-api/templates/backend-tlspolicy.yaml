@@ -1,0 +1,22 @@
+{{- if .Values.global.backendTLSPolicy.enabled }}
+apiVersion: gateway.networking.k8s.io/v1alpha3
+kind: BackendTLSPolicy
+metadata:
+  name: {{ .Values.global.backendTLSPolicy.name | default (printf "%s-backend-tls" .Values.global.metadata.name) }}
+  namespace: {{ .Values.global.metadata.namespace }}
+spec:
+  targetRefs:
+    {{- range .Values.global.backendTLSPolicy.targetRefs }}
+    - group: {{ .group | default "" | quote }}
+      kind: {{ .kind | default "Service" }}
+      name: {{ .name }}
+    {{- end }}
+  validation:
+    hostname: {{ .Values.global.backendTLSPolicy.validation.hostname | quote }}
+    caCertificateRefs:
+      {{- range .Values.global.backendTLSPolicy.validation.caCertificateRefs }}
+      - group: {{ .group | default "" | quote }}
+        kind: {{ .kind | default "ConfigMap" }}
+        name: {{ .name }}
+      {{- end }}
+{{- end }}
